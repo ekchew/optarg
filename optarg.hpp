@@ -80,7 +80,7 @@ Output:
 	1
 	0
 
-Notice how this foo_i struct is passed to both OptArg and WithDefArg. Aside from
+Notice how the foo_i struct is passed to both OptArg and WithDefArg. Aside from
 defining the data type, it serves as a unique identifier, or "tag class" in C++
 parlance, of the default value. The value itself is stored as a thread_local
 variable within OptArg, so there should be one default defined per thread per
@@ -197,6 +197,14 @@ namespace optarg {
 				Note that OptArg also has a TValue conversion operator, so you
 				need not call value() explicitly.
 
+				Both value() and the conversion operator will always perform the
+				logic of looking up the default whenever necessary. In other
+				words, the default is never cached internally. This has the
+				advantage that if you were to change the default, value() may
+				return its updated value, but it does add a small amount of
+				overhead. You may want to cache it yourself in a local variable
+				if you're going to be using it a lot.
+
 				Returns: the value passed to the function or the default
 			**/
 			auto value() && -> TValue;
@@ -208,10 +216,8 @@ namespace optarg {
 			reset method:
 
 			This clears the argument (if any) passed into the function so that
-			value() will return the default from here on.
-
-			Note that OptArg overloads the = assignment operator so that you can
-			assign a TValue back to it later if you want.
+			value() will return the default from here on. (You can always
+			re-assign a new value later on, however.)
 			**/
 			void reset() noexcept;
 
@@ -244,14 +250,14 @@ namespace optarg {
 
 			You can optionally include a second argument which is a callback
 			functor. This functor would be responsible for merging the new
-			default value into the old one. Normally, WithDefArg will simple
+			default value into the old one. Normally, WithDefArg will simply
 			replace the old value with the new, but say for example you have a
 			default flags variable, and you would prefer new defaults be
 			bit-wise or'd with the old. You could write:
 
 				struct FlagsArg{ using type = int };
 				auto orNewFlags = [](int& oldFlags, int newFlags) {
-					oldFlags |= newFlags
+					oldFlags |= newFlags;
 				};
 				WithDefArg<FlagsArg> defFlags{0x1, orNewFlags};
 			**/
