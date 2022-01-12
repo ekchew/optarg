@@ -276,9 +276,45 @@ namespace optarg {
 			TValue mSaved;
 		};
 
+	/**
+	CustomDef struct template
+
+	CustomDef gives you a bit more control over what the "root" default should
+	be for a given data type. For example, let's say you want an int to default
+	to -1 rather than 0 as it would if you wrote int{}. You could go with
+	CustomDef<int,-1>{} to make this happen.
+
+	In conjunction with OptArg, this would help you specify what goes into the
+	thread_local default initially. So in the earlier example, you could write:
+
+		struct foo_i { using type = CustomDef<int,-1>; };
+
+	CustomDef is trivially constructed and has but a single data member called
+	"value" that is initialized to the 2nd template argument. It does supply
+	conversion operators and such to let you treat a CustomDef instance as
+	though it were an instance of the data type you give in the 1st template
+	argument.
+
+	Note that C++ restricts what data types can appear as template arguments.
+	Traditionally, you're looking at integral types for the most part, though
+	under C++20, they expanded this to include floating-point and even some
+	class types with restrictions.
+	**/
+	template<typename T, T DefVal>
+		struct CustomDef {
+			using type = T;
+			static constexpr type kDefVal = DefVal;
+			type value = kDefVal;
+			constexpr operator type&() noexcept { return value; }
+			constexpr operator const type&() const noexcept { return value; }
+			auto operator= (const CustomDef&) noexcept -> CustomDef& = default;
+			constexpr auto operator= (const type& newVal) noexcept
+				-> CustomDef& { return value = newVal, *this; }
+		};
+
 	//==== Template Implementation =============================================
 
-	// ---- OptArg -------------------------------------------------------------
+	//---- OptArg --------------------------------------------------------------
 
 	template<typename T, typename V>
 		auto OptArg<T,V>::GetDefault() noexcept -> const TValue& {
@@ -315,7 +351,7 @@ namespace optarg {
 	template<typename Tag, typename Value>
 		thread_local Value OptArg<Tag,Value>::tlDefVal{};
 
-	// ----WithDefArg ----------------------------------------------------------
+	//---- WithDefArg ----------------------------------------------------------
 
 	template<typename T, typename V>
 		WithDefArg<T,V>::WithDefArg(const TValue& v):
