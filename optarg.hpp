@@ -276,7 +276,17 @@ namespace optarg {
 
 				Returns: the value passed to the function or the default
 			**/
-			auto value() && -> TValue {
+			auto value() && -> TValue
+				/*
+					Implementation note:
+						The astute may notice that this move version value() is
+						not declared noexcept. If the OptArg is actually holding
+						onto a value, it should be moved and therefore throw no
+						exception. However, if we need to return the default
+						instead, this will have to be a copy operation which
+						could conceivably fail for a resource-managing class?
+				*/
+			 {
 				return this->defaults() ?
 					this->tlDefVal : std::move(*this->mOptVal);
 			 }
