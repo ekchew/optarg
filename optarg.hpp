@@ -10,7 +10,7 @@ header adds the ability to work with run-time defaults.
 Consider a simple example like this:
 
 	void foo(int i = 0) {
-		std::cout << "i: " << i << '\n';
+		std::cout << i << '\n';
 	}
 
 Calling foo(42) will print 42, but calling foo() with no arguments will still
