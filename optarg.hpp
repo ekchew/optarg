@@ -166,9 +166,7 @@ namespace optarg {
 		struct OptArgBase {
 			template<typename, typename> friend class WithDefArg;
 
-			using TTag = Tag;
-			using TValue = Value;
-			using TOptVal = std::optional<TValue>;
+			using TOptVal = std::optional<Value>;
 
 			/**
 			Make class method
@@ -197,9 +195,9 @@ namespace optarg {
 			These are low-level accessors that let you manage the default value
 			yourself. Normally, you would use WithDefArg to do so instead.
 			**/
-			static auto GetDefault() noexcept -> const TValue&;
-			static void SetDefault(TValue&& v) noexcept;
-			static void SetDefault(const TValue& v);
+			static auto GetDefault() noexcept -> const Value&;
+			static void SetDefault(Value&& v) noexcept;
+			static void SetDefault(const Value& v);
 
 			constexpr OptArgBase() noexcept = default;
 			constexpr OptArgBase(const OptArgBase&) = default;
@@ -218,8 +216,8 @@ namespace optarg {
 					Args&&... args
 					):
 					mOptVal(ip, ilist, std::forward<Args>(args)...) {}
-			constexpr OptArgBase(TValue&& value):
-				mOptVal{std::forward<TValue>(value)} {}
+			constexpr OptArgBase(Value&& value):
+				mOptVal{std::forward<Value>(value)} {}
 
 			constexpr auto operator= (OptArgBase&&) noexcept
 				-> OptArgBase& = default;
@@ -244,7 +242,7 @@ namespace optarg {
 			void reset() noexcept;
 
 		 protected:
-			static thread_local TValue tlDefVal;
+			static thread_local Value tlDefVal;
 			TOptVal mOptVal;
 		};
 	template<
@@ -278,13 +276,13 @@ namespace optarg {
 			**/
 			auto value() && -> TValue
 				/*
-					Implementation note:
-						The astute may notice that this move version value() is
-						not declared noexcept. If the OptArg is actually holding
-						onto a value, it should be moved and therefore throw no
-						exception. However, if we need to return the default
-						instead, this will have to be a copy operation which
-						could conceivably fail for a resource-managing class?
+				Implementation note:
+					The astute may notice that this move version value() is
+					not declared noexcept. If the OptArg is actually holding
+					onto a value, it should be moved and therefore throw no
+					exception. However, if we need to return the default
+					instead, this will have to be a copy operation which
+					could conceivably fail for a resource-managing class?
 				*/
 			 {
 				return this->defaults() ?
@@ -375,15 +373,15 @@ namespace optarg {
 	//---- OptArgBase ----------------------------------------------------------
 
 	template<typename C, typename T, typename V>
-		auto OptArgBase<C,T,V>::GetDefault() noexcept -> const TValue& {
+		auto OptArgBase<C,T,V>::GetDefault() noexcept -> const V& {
 			return tlDefVal;
 		}
 	template<typename C, typename T, typename V>
-		void OptArgBase<C,T,V>::SetDefault(TValue&& v) noexcept {
+		void OptArgBase<C,T,V>::SetDefault(V&& v) noexcept {
 			tlDefVal = std::move(v);
 		}
 	template<typename C, typename T, typename V>
-		void OptArgBase<C,T,V>::SetDefault(const TValue& v) {
+		void OptArgBase<C,T,V>::SetDefault(const V& v) {
 			tlDefVal = v;
 		}
 	template<typename C, typename T, typename V>
