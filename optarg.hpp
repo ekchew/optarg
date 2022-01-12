@@ -20,7 +20,7 @@ With OptArg, you could rewrite the function like this:
 
 	struct foo_i{ using type = int };
 	void foo(OptArg<foo_i> i = {}) {
-		std::cout << "i: " << i << '\n';
+		std::cout << i << '\n';
 	}
 
 For each argument with an optional value, you define a simple struct that
