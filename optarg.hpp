@@ -88,9 +88,47 @@ tag.
 **/
 
 #include <optional>
+#include <type_traits>
 #include <utility>
 
 namespace optarg {
+
+	/**
+	CustomDef struct template
+
+	CustomDef gives you a bit more control over what the "root" default should
+	be for a given data type. For example, let's say you want an int to default
+	to -1 rather than 0 as it would if you wrote int{}. You could go with
+	CustomDef<int,-1>{} to make this happen.
+
+	In conjunction with OptArg, this would help you specify what goes into the
+	thread_local default initially. So in the earlier example, you could write:
+
+		struct foo_i { using type = CustomDef<int,-1>; };
+
+	CustomDef is trivially constructed and has but a single data member called
+	"value" that is initialized to the 2nd template argument. It does supply
+	conversion operators and such to let you treat a CustomDef instance as
+	though it were an instance of the data type you give in the 1st template
+	argument.
+
+	Note that C++ restricts what data types can appear as template arguments.
+	Traditionally, you're looking at integral types for the most part, though
+	under C++20, they expanded this to include floating-point and even some
+	class types with restrictions.
+	**/
+	struct CustomDefBase {};
+	template<typename T, T DefVal>
+		struct CustomDef: CustomDefBase {
+			using type = T;
+			static constexpr type kDefVal = DefVal;
+			type value = kDefVal;
+			constexpr operator type&() noexcept { return value; }
+			constexpr operator const type&() const noexcept { return value; }
+			auto operator= (const CustomDef&) noexcept -> CustomDef& = default;
+			constexpr auto operator= (const type& newVal) noexcept
+				-> CustomDef& { return value = newVal, *this; }
+		};
 
 	/**
 	OptArg struct template
@@ -117,9 +155,15 @@ namespace optarg {
 			not to let you treat an OptArg as though it were a Value in most
 			situations. There is some overhead to doing so however (see value()
 			method for details).
+
+	Implementation Note:
+		Much of the functionality of OptArg is actually implemented in its
+		parent struct: OptArgBase. The exception is the value() method and
+		associated conversion operator. These have been specialized to handle
+		CustomDef Value types seemlessly.
 	**/
-	template<typename Tag, typename Value = typename Tag::type>
-		struct OptArg {
+	template<typename OptArg, typename Tag, typename Value>
+		struct OptArgBase {
 			template<typename, typename> friend class WithDefArg;
 
 			using TTag = Tag;
@@ -157,28 +201,30 @@ namespace optarg {
 			static void SetDefault(TValue&& v) noexcept;
 			static void SetDefault(const TValue& v);
 
-			constexpr OptArg() noexcept = default;
-			constexpr OptArg(const OptArg&) = default;
-			constexpr OptArg(OptArg&&) noexcept = default;
-			constexpr OptArg(std::nullopt_t nullOpt) noexcept:
+			constexpr OptArgBase() noexcept = default;
+			constexpr OptArgBase(const OptArgBase&) = default;
+			constexpr OptArgBase(OptArgBase&&) noexcept = default;
+			constexpr OptArgBase(std::nullopt_t nullOpt) noexcept:
 				mOptVal{nullOpt} {}
-			constexpr OptArg(const TOptVal& optVal): mOptVal{optVal} {}
-			constexpr OptArg(TOptVal&& optVal) noexcept:
+			constexpr OptArgBase(const TOptVal& optVal): mOptVal{optVal} {}
+			constexpr OptArgBase(TOptVal&& optVal) noexcept:
 				mOptVal{std::move(optVal)} {}
 			template<typename... Args>
-				constexpr explicit OptArg(std::in_place_t ip, Args&&... args):
+				constexpr explicit OptArgBase(std::in_place_t ip, Args&&... args):
 					mOptVal(ip, std::forward<Args>(args)...) {}
 			template<typename T, typename... Args>
-				constexpr explicit OptArg(
+				constexpr explicit OptArgBase(
 					std::in_place_t ip, std::initializer_list<T> ilist,
 					Args&&... args
 					):
 					mOptVal(ip, ilist, std::forward<Args>(args)...) {}
-			constexpr OptArg(TValue&& value):
+			constexpr OptArgBase(TValue&& value):
 				mOptVal{std::forward<TValue>(value)} {}
 
-			constexpr auto operator= (OptArg&&) noexcept -> OptArg& = default;
-			constexpr auto operator= (const OptArg&) -> OptArg& = default;
+			constexpr auto operator= (OptArgBase&&) noexcept
+				-> OptArgBase& = default;
+			constexpr auto operator= (const OptArgBase&)
+				-> OptArgBase& = default;
 
 			/**
 			defaults method:
@@ -187,6 +233,29 @@ namespace optarg {
 			constexpr auto defaults() const -> bool {
 				return !mOptVal.has_value();
 			 }
+
+			/**
+			reset method:
+
+			This clears the argument (if any) passed into the function so that
+			value() will return the default from here on. (You can always
+			re-assign a new value later on, however.)
+			**/
+			void reset() noexcept;
+
+		 protected:
+			static thread_local TValue tlDefVal;
+			TOptVal mOptVal;
+		};
+	template<
+		typename Tag,
+		typename Value = typename Tag::type,
+		typename Enable = void
+		>
+		struct OptArg: OptArgBase<OptArg<Tag,Value>,Tag,Value> {
+			using OptArgBase<OptArg<Tag,Value>,Tag,Value>::OptArgBase;
+			using TTag = Tag;
+			using TValue = Value;
 
 			/**
 			value method:
@@ -207,24 +276,39 @@ namespace optarg {
 
 				Returns: the value passed to the function or the default
 			**/
-			auto value() && -> TValue;
-			auto value() const& noexcept -> const TValue&;
-			operator TValue() &&;
-			operator const TValue&() const& noexcept;
-
-			/**
-			reset method:
-
-			This clears the argument (if any) passed into the function so that
-			value() will return the default from here on. (You can always
-			re-assign a new value later on, however.)
-			**/
-			void reset() noexcept;
-
-		 private:
-			static thread_local TValue tlDefVal;
-			TOptVal mOptVal;
+			auto value() && -> TValue {
+				return this->defaults() ?
+					this->tlDefVal : std::move(*this->mOptVal);
+			 }
+			auto value() const& noexcept -> const TValue& {
+				return this->defaults() ? this->tlDefVal : *this->mOptVal;
+			 }
+			operator TValue() && { return value(); }
+			operator const TValue&() const& noexcept { return value(); }
 		};
+	template<typename Tag, typename Value>
+		struct OptArg<
+			Tag,
+			Value,
+			std::enable_if_t<std::is_base_of_v<CustomDefBase,Value>>
+			>:
+			OptArgBase<OptArg<Tag,Value>,Tag,Value>
+		{
+			using OptArgBase<OptArg<Tag,Value>,Tag,Value>::OptArgBase;
+			using TTag = Tag;
+			using TValue = typename Value::type;
+			auto value() && -> TValue {
+				return this->defaults() ?
+					this->tlDefVal.value : std::move(this->mOptVal->value);
+			}
+			auto value() const& noexcept -> const TValue& {
+				return this->defaults() ?
+					this->tlDefVal.value : this->mOptVal->value;
+			}
+			operator TValue() && { return value(); }
+			operator const TValue&() const& noexcept { return value(); }
+		};
+		
 
 	/**
 	WithDefArg struct template
@@ -276,80 +360,28 @@ namespace optarg {
 			TValue mSaved;
 		};
 
-	/**
-	CustomDef struct template
-
-	CustomDef gives you a bit more control over what the "root" default should
-	be for a given data type. For example, let's say you want an int to default
-	to -1 rather than 0 as it would if you wrote int{}. You could go with
-	CustomDef<int,-1>{} to make this happen.
-
-	In conjunction with OptArg, this would help you specify what goes into the
-	thread_local default initially. So in the earlier example, you could write:
-
-		struct foo_i { using type = CustomDef<int,-1>; };
-
-	CustomDef is trivially constructed and has but a single data member called
-	"value" that is initialized to the 2nd template argument. It does supply
-	conversion operators and such to let you treat a CustomDef instance as
-	though it were an instance of the data type you give in the 1st template
-	argument.
-
-	Note that C++ restricts what data types can appear as template arguments.
-	Traditionally, you're looking at integral types for the most part, though
-	under C++20, they expanded this to include floating-point and even some
-	class types with restrictions.
-	**/
-	template<typename T, T DefVal>
-		struct CustomDef {
-			using type = T;
-			static constexpr type kDefVal = DefVal;
-			type value = kDefVal;
-			constexpr operator type&() noexcept { return value; }
-			constexpr operator const type&() const noexcept { return value; }
-			auto operator= (const CustomDef&) noexcept -> CustomDef& = default;
-			constexpr auto operator= (const type& newVal) noexcept
-				-> CustomDef& { return value = newVal, *this; }
-		};
-
 	//==== Template Implementation =============================================
 
-	//---- OptArg --------------------------------------------------------------
+	//---- OptArgBase ----------------------------------------------------------
 
-	template<typename T, typename V>
-		auto OptArg<T,V>::GetDefault() noexcept -> const TValue& {
+	template<typename C, typename T, typename V>
+		auto OptArgBase<C,T,V>::GetDefault() noexcept -> const TValue& {
 			return tlDefVal;
 		}
-	template<typename T, typename V>
-		void OptArg<T,V>::SetDefault(TValue&& v) noexcept {
+	template<typename C, typename T, typename V>
+		void OptArgBase<C,T,V>::SetDefault(TValue&& v) noexcept {
 			tlDefVal = std::move(v);
 		}
-	template<typename T, typename V>
-		void OptArg<T,V>::SetDefault(const TValue& v) {
+	template<typename C, typename T, typename V>
+		void OptArgBase<C,T,V>::SetDefault(const TValue& v) {
 			tlDefVal = v;
 		}
-	template<typename T, typename V>
-		auto OptArg<T,V>::value() && -> TValue {
-			return defaults() ? tlDefVal : std::move(*mOptVal);
-		}
-	template<typename T, typename V>
-		auto OptArg<T,V>::value() const& noexcept -> const TValue& {
-			return defaults() ? tlDefVal : *mOptVal;
-		}
-	template<typename T, typename V>
-		OptArg<T,V>::operator TValue() && {
-			return value();
-		}
-	template<typename T, typename V>
-		OptArg<T,V>::operator const TValue&() const& noexcept {
-			return value();
-		}
-	template<typename T, typename V>
-		void OptArg<T,V>::reset() noexcept {
+	template<typename C, typename T, typename V>
+		void OptArgBase<C,T,V>::reset() noexcept {
 			return mOptVal.reset();
 		}
-	template<typename Tag, typename Value>
-		thread_local Value OptArg<Tag,Value>::tlDefVal{};
+	template<typename C, typename T, typename V>
+		thread_local V OptArgBase<C,T,V>::tlDefVal{};
 
 	//---- WithDefArg ----------------------------------------------------------
 
