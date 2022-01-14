@@ -94,47 +94,98 @@ tag.
 namespace optarg {
 
 	/**
-	CustomDef struct template
+	Class hierarchy
 
-	CustomDef gives you a bit more control over what the "root" default should
-	be for a given data type. For example, let's say you want an int to default
-	to -1 rather than 0 as it would if you wrote int{}. You could go with
-	CustomDef<int,-1>{} to make this happen.
+	CustomDefBase
+		CustomDefTmpl
+			CustomDef
+			CustomDefByFn
+
+	The CustomDef... classes give you a bit more control over what the "root"
+	default should be for a given data type. For example, say you want an int
+	to default to -1 rather than 0 as it would if you wrote int{}. You could
+	declare a CustomDef<int,-1>{} instead to make this happen.
 
 	In conjunction with OptArg, this would help you specify what goes into the
 	thread_local default initially. So in the earlier example, you could write:
 
 		struct foo_i { using type = CustomDef<int,-1>; };
 
-	CustomDef is trivially constructed and has but a single data member called
-	"value" that is initialized to the 2nd template argument. It does supply
-	conversion operators and such to let you treat a CustomDef instance as
-	though it were an instance of the data type you give in the 1st template
-	argument.
+	This class wrapper around an int should behave like an int in most contexts,
+	as conversion operators and such have been defined for this in CustomDef.
+	Alternatively, you can access the int from the class's only public data
+	member: value.
 
-	Note that C++ restricts what data types can appear as template arguments.
-	Traditionally, you're looking at integral types for the most part, though
-	under C++20, they expanded this to include floating-point and even some
-	class types with restrictions.
+	CustomDefBase:
+		The base class of CustomDefTmpl has no functionality of its own and
+		should never be directly instantiated. It is only there to make it easy
+		for OptArg to specialize its template to any class that inherits from
+		CustomDefBase.
+	CustomDefTmpl:
+		This defines the common functionality between CustomDef and
+		CustomDefByFn. CustomDefTmpl defines the "value" data member. But again,
+		as with CustomDefBase, you would never instantiate this class directly.
+	CustomDef:
+		As described above, CustomDef lets you specify the default value for a
+		data type in its 2nd template argument. Note that C++ does not allow
+		any arbitrary data type to be a template argument. Traditionally, it is
+		mostly restricted to integral types, though C++20 opened things up a bit
+		to allow float-point types and even some class types with restrictions.
+	CustomDefByFn:
+		If your data type is incompatible with CustomDef, you can try
+		CustomDefByFn instead. In this case, the 2nd template argument should
+		be a function which simply returns the desired default value.
+		Let's say you wanted to rewrite foo_i this way. You could go:
+
+			struct foo_i {
+				static constexpr auto Init() -> int { return -1; }
+				using type = CustomDefByFn<int,Init>;
+			};
 	**/
 	struct CustomDefBase {};
+	template<typename T>
+		struct CustomDefTmpl: CustomDefBase {
+			T value;
+			CustomDefTmpl(const CustomDefTmpl&) = default;
+			CustomDefTmpl(CustomDefTmpl&&) noexcept = default;
+			constexpr CustomDefTmpl(const T& v): value{v} {}
+			constexpr CustomDefTmpl(T&& v) noexcept: value{std::move(v)} {}
+			constexpr operator T&() noexcept { return value; }
+			constexpr operator const T&() const noexcept { return value; }
+			auto operator= (const CustomDefTmpl&) -> CustomDefTmpl& = default;
+			auto operator= (CustomDefTmpl&&) noexcept
+				-> CustomDefTmpl& = default;
+			constexpr auto operator= (const T& v) -> CustomDefTmpl& {
+				return value = v, *this;
+			 }
+			constexpr auto operator= (T&& v) noexcept -> CustomDefTmpl& {
+				return value = std::move(v), *this;
+			 }
+		};
 	template<typename T, T DefVal>
-		struct CustomDef: CustomDefBase {
+		struct CustomDef: CustomDefTmpl<T> {
 			using type = T;
-			static constexpr type kDefVal = DefVal;
-			type value = kDefVal;
-			constexpr operator type&() noexcept { return value; }
-			constexpr operator const type&() const noexcept { return value; }
-			auto operator= (const CustomDef&) noexcept -> CustomDef& = default;
-			constexpr auto operator= (const type& newVal) noexcept
-				-> CustomDef& { return value = newVal, *this; }
+			using CustomDefTmpl<T>::CustomDefTmpl;
+			constexpr CustomDef() noexcept: CustomDefTmpl<T>{DefVal} {}
+		};
+	template<typename T, T(*DefFn)()>
+		struct CustomDefByFn: CustomDefTmpl<T> {
+			using type = T;
+			using CustomDefTmpl<T>::CustomDefTmpl;
+			constexpr CustomDefByFn() noexcept: CustomDefTmpl<T>{DefFn()} {}
 		};
 
 	/**
-	OptArg struct template
+	Class hierarchy:
+		OptArgBase
+			OptArg
 
-	This data structure manages the value (if any) passed into the function,
-	as well as its thread-local default.
+	The OptArg data structure manages the value (if any) passed to your
+	function as an argument, as well as its thread-local default.
+
+	(The reason the class is split in 2 is that OptArg is specialized to deal
+	with CustomDef and CustomDefByFn data types while OptArgBase implements
+	functionality common to either specialization.)
 
 	Template args:
 		Tag:
@@ -198,7 +249,9 @@ namespace optarg {
 			constexpr OptArgBase(TOptVal&& optVal) noexcept:
 				mOptVal{std::move(optVal)} {}
 			template<typename... Args>
-				constexpr explicit OptArgBase(std::in_place_t ip, Args&&... args):
+				constexpr explicit OptArgBase(
+					std::in_place_t ip, Args&&... args
+					):
 					mOptVal(ip, std::forward<Args>(args)...) {}
 			template<typename T, typename... Args>
 				constexpr explicit OptArgBase(
