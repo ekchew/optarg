@@ -87,6 +87,7 @@ variable within OptArg, so there should be one default defined per thread per
 tag.
 **/
 
+#include <array>
 #include <optional>
 #include <type_traits>
 #include <utility>
@@ -391,32 +392,39 @@ namespace optarg {
 	Class hierarchy:
 		WithDefArgBase:
 			WithDefArg
+				WithDefFlags
 
 	WithDefArg is designed to be instanced as a local variable in a function
-	where you want to change the default value.
+	where you want to change the default value. It cannot be copy, move, or
+	default-constructed. Rather, you construct by passing the new default value
+	you want to use as the required 1st constructor argument.
+
+	You can also supply a 2nd argument if you want to customize how the new
+	value is merged into the old. It is a functor whose default behaviour is to
+	simply replace the old default value with the new one.
+
+	But let's say you wanted the new value added to the existing one instead?
+	You could write:
+
+		WithDefArg<foo_i> def{
+			42, [](int& old_i, int new_i) { old_i += new_i; }
+			};
+
+	WithDefFlags uses this 2nd argument of WithDefArg to better handle an
+	integer type variable you are using to store bit flags. If you wrote
+
+		WithDefFlags<foo_i> def{0x3};
+	
+	it would make sure the 2 least-significant bits are set. If you wanted to
+	clear them instead, you could write:
+
+		WithDefFlags<foo_i> def{0x3, kBitwise::AndC};
+
+	This is in contrast to the default 2nd argument: kBitwise::Or. There is
+	also a kBitwise::XOr for flipping bits.
 	**/
 	template<typename Tag, typename Value>
 		struct WithDefArgBase {
-			/**
-			Constructors
-
-			This struct cannot be copy, move, or default-constructed. Rather,
-			it is constructed from the value it is setting to be the new
-			default. (The value itself can be copied or moved into place.)
-
-			You can optionally include a second argument which is a callback
-			functor. This functor would be responsible for merging the new
-			default value into the old one. Normally, WithDefArg will simply
-			replace the old value with the new, but say for example you have a
-			default flags variable, and you would prefer new defaults be
-			bit-wise or'd with the old. You could write:
-
-				struct FlagsArg{ using type = int };
-				auto orNewFlags = [](int& oldFlags, int newFlags) {
-					oldFlags |= newFlags;
-				};
-				WithDefArg<FlagsArg> defFlags{0x1, orNewFlags};
-			**/
 			WithDefArgBase(const Value& v);
 			WithDefArgBase(Value&& v) noexcept;
 			template<typename MergeFn>
@@ -464,6 +472,16 @@ namespace optarg {
 					WithDefArgBase<Tag,Value>{
 						static_cast<Value>(std::move(v)), mergeFn
 						} {}
+		};
+	enum class kBitwise { Or, AndC, XOr };
+	template<typename Tag, typename Int = typename Tag::type>
+		struct WithDefFlags: WithDefArg<Tag,Int> {
+			static constexpr std::array<void(*)(Int&,Int), 2> kHandleOp = {
+				[](Int& dst, Int src) { dst |= src; }, // kBitwise::Or
+				[](Int& dst, Int src) { dst &= ~src; },  // kBitwise::AndC
+				[](Int& dst, Int src) { dst ^= src; }   // kBitwise::XOr
+				};
+			WithDefFlags(Int mask, kBitwise op = kBitwise::Or) noexcept;
 		};
 
 	//==== Template Implementation =============================================
@@ -514,6 +532,14 @@ namespace optarg {
 	template<typename T, typename V>
 		WithDefArgBase<T,V>::~WithDefArgBase() noexcept {
 			tlDefVal() = std::move(mSaved);
+		}
+
+	// ---- WithDefFlags -------------------------------------------------------
+
+	template<typename T, typename I>
+		WithDefFlags<T,I>::WithDefFlags(I mask, kBitwise op) noexcept:
+			WithDefArg<T,I>{mask, kHandleOp[op]}
+		{
 		}
 }
 
