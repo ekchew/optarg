@@ -153,8 +153,7 @@ namespace optarg {
 			constexpr operator T&() noexcept { return value; }
 			constexpr operator const T&() const noexcept { return value; }
 			auto operator= (const CustomDefTmpl&) -> CustomDefTmpl& = default;
-			auto operator= (CustomDefTmpl&&) noexcept
-				-> CustomDefTmpl& = default;
+			auto operator= (CustomDefTmpl&&) -> CustomDefTmpl& = default;
 			constexpr auto operator= (const T& v) -> CustomDefTmpl& {
 				return value = v, *this;
 			 }
@@ -215,7 +214,7 @@ namespace optarg {
 	**/
 	template<typename OptArg, typename Tag, typename Value>
 		struct OptArgBase {
-			template<typename, typename> friend class WithDefArg;
+			template<typename, typename, typename> friend class WithDefArg;
 
 			using TOptVal = std::optional<Value>;
 
@@ -389,20 +388,15 @@ namespace optarg {
 		
 
 	/**
-	WithDefArg struct template
+	Class hierarchy:
+		WithDefArgBase:
+			WithDefArg
 
-	This struct is designed to be instanced as a local variable in a function
+	WithDefArg is designed to be instanced as a local variable in a function
 	where you want to change the default value.
-
-	Template Args:
-		Tag: see OptArg
-		Value: see OptArg
 	**/
-	template<typename Tag, typename Value = typename Tag::type>
-		struct WithDefArg {
-			using TTag = Tag;
-			using TValue = Value;
-
+	template<typename Tag, typename Value>
+		struct WithDefArgBase {
 			/**
 			Constructors
 
@@ -423,19 +417,53 @@ namespace optarg {
 				};
 				WithDefArg<FlagsArg> defFlags{0x1, orNewFlags};
 			**/
-			WithDefArg(const TValue& v);
-			WithDefArg(TValue&& v) noexcept;
+			WithDefArgBase(const Value& v);
+			WithDefArgBase(Value&& v) noexcept;
 			template<typename MergeFn>
-				WithDefArg(const TValue& v, MergeFn&& mergeFn);
+				WithDefArgBase(const Value& v, MergeFn&& mergeFn);
 			template<typename MergeFn>
-				WithDefArg(TValue&& v, MergeFn&& mergeFn) noexcept;
-			WithDefArg(const WithDefArg&) = delete;
-			WithDefArg(WithDefArg&&) = delete;
+				WithDefArgBase(Value&& v, MergeFn&& mergeFn) noexcept;
+			WithDefArgBase(const WithDefArgBase&) = delete;
+			WithDefArgBase(WithDefArgBase&&) = delete;
+			~WithDefArgBase() noexcept;
+		
+		protected:
+			static auto tlDefVal() noexcept -> Value&;
 
-			~WithDefArg() noexcept;
-
-		private:
-			TValue mSaved;
+			Value mSaved;
+		};
+	template<
+		typename Tag,
+		typename Value = typename Tag::type,
+		typename Enable = void
+		>
+		struct WithDefArg: WithDefArgBase<Tag,Value> {
+			using TTag = Tag;
+			using TValue = Value;
+			using WithDefArgBase<Tag,Value>::WithDefArgBase;
+		};
+	template<typename Tag, typename Value>
+		struct WithDefArg<
+			Tag,
+			Value,
+			std::enable_if_t<std::is_base_of_v<CustomDefBase,Value>>
+			>:
+			WithDefArgBase<Tag,Value>
+		{
+			using TTag = Tag;
+			using TValue = typename Value::type;
+			WithDefArg(const TValue& v):
+				WithDefArgBase<Tag,Value>{static_cast<Value>(v)} {}
+			WithDefArg(TValue&& v) noexcept:
+				WithDefArgBase<Tag,Value>{static_cast<Value>(std::move(v))} {}
+			template<typename MergeFn>
+				WithDefArg(const TValue& v, MergeFn&& mergeFn):
+					WithDefArgBase<Tag,Value>{static_cast<Value>(v), mergeFn} {}
+			template<typename MergeFn>
+				WithDefArg(TValue&& v, MergeFn&& mergeFn) noexcept:
+					WithDefArgBase<Tag,Value>{
+						static_cast<Value>(std::move(v)), mergeFn
+						} {}
 		};
 
 	//==== Template Implementation =============================================
@@ -449,35 +477,43 @@ namespace optarg {
 	template<typename C, typename T, typename V>
 		thread_local V OptArgBase<C,T,V>::tlDefVal{};
 
-	//---- WithDefArg ----------------------------------------------------------
+	//---- WithDefArgBase ------------------------------------------------------
 
 	template<typename T, typename V>
-		WithDefArg<T,V>::WithDefArg(const TValue& v):
-			mSaved{OptArgBase<OptArg<T,V>,T,V>::tlDefVal}
-		{
-			OptArgBase<OptArg<T,V>,T,V>::tlDefVal = v;
+		auto WithDefArgBase<T,V>::tlDefVal() noexcept -> V& {
+			return OptArgBase<OptArg<T,V>,T,V>::tlDefVal;
 		}
 	template<typename T, typename V>
-		WithDefArg<T,V>::WithDefArg(TValue&& v) noexcept:
-			mSaved{OptArgBase<OptArg<T,V>,T,V>::tlDefVal}
+		WithDefArgBase<T,V>::WithDefArgBase(const V& v):
+			mSaved{tlDefVal()}
 		{
-			OptArgBase<OptArg<T,V>,T,V>::tlDefVal = std::move(v);
+			tlDefVal() = v;
 		}
 	template<typename T, typename V> template<typename MergeFn>
-		WithDefArg<T,V>::WithDefArg(const TValue& v, MergeFn&& mergeFn):
-			mSaved{OptArg<T,V>::tlDefVal}
+		WithDefArgBase<T,V>::WithDefArgBase(
+			const V& v, MergeFn&& mergeFn
+			):
+			mSaved{tlDefVal()}
 		{
-			mergeFn(OptArgBase<OptArg<T,V>,T,V>::tlDefVal, v);
+			mergeFn(tlDefVal(), v);
 		}
 	template<typename T, typename V> template<typename MergeFn>
-		WithDefArg<T,V>::WithDefArg(TValue&& v, MergeFn&& mergeFn) noexcept:
-			mSaved{OptArgBase<OptArg<T,V>,T,V>::tlDefVal}
+		WithDefArgBase<T,V>::WithDefArgBase(
+			V&& v, MergeFn&& mergeFn
+			) noexcept:
+			mSaved{tlDefVal()}
 		{
-			mergeFn(OptArgBase<OptArg<T,V>,T,V>::tlDefVal, std::move(v));
+			mergeFn(tlDefVal(), std::move(v));
 		}
 	template<typename T, typename V>
-		WithDefArg<T,V>::~WithDefArg() noexcept {
-			OptArgBase<OptArg<T,V>,T,V>::tlDefVal = std::move(mSaved);
+		WithDefArgBase<T,V>::WithDefArgBase(V&& v) noexcept:
+			mSaved{tlDefVal()}
+		{
+			tlDefVal() = std::move(v);
+		}
+	template<typename T, typename V>
+		WithDefArgBase<T,V>::~WithDefArgBase() noexcept {
+			tlDefVal() = std::move(mSaved);
 		}
 }
 
