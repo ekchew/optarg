@@ -142,6 +142,13 @@ namespace optarg {
 				static constexpr auto Init() -> int { return -1; }
 				using type = CustomDefByFn<int,Init>;
 			};
+
+	WARNING:
+		It is conceivable that in some thread pool implementations, a thread may
+		get re-used without the usual thread_local variable initializations. If
+		there is a risk of this in your own project, it may be safer to set your
+		root defaults using WithDefArg declarations at the top of your thread
+		functions.
 	**/
 	struct CustomDefBase {};
 	template<typename T>
@@ -386,7 +393,7 @@ namespace optarg {
 		protected:
 			using OptArgBase<OptArg<Tag,Value>,Tag,Value>::tlDefVal;
 		};
-		
+
 
 	/**
 	Class hierarchy:
@@ -414,7 +421,7 @@ namespace optarg {
 	integer type variable you are using to store bit flags. If you wrote
 
 		WithDefFlags<foo_i> def{0x3};
-	
+
 	it would make sure the 2 least-significant bits are set. If you wanted to
 	clear them instead, you could write:
 
@@ -434,7 +441,7 @@ namespace optarg {
 			WithDefArgBase(const WithDefArgBase&) = delete;
 			WithDefArgBase(WithDefArgBase&&) = delete;
 			~WithDefArgBase() noexcept;
-		
+
 		protected:
 			static auto tlDefVal() noexcept -> Value&;
 
