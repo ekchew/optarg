@@ -266,6 +266,8 @@ namespace optarg {
 					Args&&... args
 					):
 					mOptVal(ip, ilist, std::forward<Args>(args)...) {}
+			constexpr OptArgBase(const Value& value):
+				mOptVal{value} {}
 			constexpr OptArgBase(Value&& value):
 				mOptVal{std::forward<Value>(value)} {}
 
