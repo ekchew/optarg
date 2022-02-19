@@ -381,6 +381,10 @@ namespace optarg {
 				tlDefVal.value = std::move(v);
 			 }
 			static void SetDefault(const TValue& v) { tlDefVal.value = v; }
+			OptArg(const TValue& v):
+				OptArgBase<OptArg<Tag,Value>,Tag,Value>{Value{v}} {}
+			OptArg(TValue&& v):
+				OptArgBase<OptArg<Tag,Value>,Tag,Value>{Value{std::move(v)}} {}
 			auto value() && -> TValue {
 				return this->defaults() ?
 					this->tlDefVal.value : std::move(this->mOptVal->value);
