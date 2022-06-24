@@ -92,7 +92,7 @@ tag.
 #include <type_traits>
 #include <utility>
 
-namespace optarg {
+namespace oarg {
 
 	/**
 	Class hierarchy
